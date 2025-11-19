@@ -1,16 +1,16 @@
 # listen.py — сбор контента из заданных групп/каналов:
-#   - слушаем только MONITORED_CHATS
-#   - скачиваем фото и альбомы
-#   - загружаем в Supabase Storage (публичный бакет)
-#   - пишем одну запись в incoming_posts с JSON-массивом photo_list
+# - слушаем только MONITORED_CHATS
+# - скачиваем фото и альбомы
+# - загружаем в Supabase Storage (публичный бакет)
+# - пишем одну запись в incoming_posts с JSON-массивом photo_list
 
 import os
 import asyncio
 from datetime import datetime
 from typing import List, Dict, Optional
-
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.types import User
 from supabase import create_client, Client
 
@@ -23,6 +23,7 @@ SESSION_NAME = os.getenv("SESSION_NAME", "collector")
 
 # Что мониторим (через запятую): @chan1,@chan2,-1001234567890
 MONITORED_CHATS_ENV = os.getenv("MONITORED_CHATS", "https://t.me/replicadesignerbags")
+
 def _parse_monitored(env: str) -> List[object]:
     out: List[object] = []
     for raw in env.split(","):
@@ -60,7 +61,7 @@ supa: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ---------- Хелперы ----------
 
 def _best_caption(messages) -> str:
-    caps = [ (m.raw_text or "").strip() for m in messages ]
+    caps = [(m.raw_text or "").strip() for m in messages]
     caps = [c for c in caps if c]
     return max(caps, key=len) if caps else ""
 
@@ -114,12 +115,24 @@ async def _sender_meta(event):
 # ---------- Основной запуск ----------
 
 async def run():
-    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+    # Проверяем наличие StringSession из переменной окружения
+    session_string = os.getenv("TELEGRAM_SESSION", "")
+    
+    if session_string:
+        # Используем StringSession для Docker/Railway
+        session = StringSession(session_string)
+        print("📱 Используется StringSession из переменной окружения")
+    else:
+        # Локально используем файл сессии
+        session = SESSION_NAME
+        print("📁 Используется файл сессии (локальный режим)")
+    
+    client = TelegramClient(session, API_ID, API_HASH)
     
     # Подключаемся без интерактивного запроса
     await client.connect()
     if not await client.is_user_authorized():
-        raise RuntimeError("Session file is not authorized! Create .session file locally first.")
+        raise RuntimeError("Session is not authorized! Check TELEGRAM_SESSION variable or .session file.")
     
     print(f"🚀 Collector запущен, слушаем: {MONITORED_CHATS}")
 
@@ -134,6 +147,7 @@ async def run():
         media_dir = "./downloaded_media"
         os.makedirs(media_dir, exist_ok=True)
         local_paths: List[str] = []
+
         for i, msg in enumerate(event.messages, start=1):
             if getattr(msg, "photo", None):
                 fn = f"{event.chat_id}_{event.messages[0].id}_{i}.jpg"
@@ -158,17 +172,18 @@ async def run():
             "timestamp": (event.date or datetime.utcnow()).isoformat(),
             "username": username,
             "full_name": full_name,
-            "matched": True,              # без триггеров — просто пометка включения в выборку
+            "matched": True,  # без триггеров — просто пометка включения в выборку
             "images_count": len(uploaded),
-            "photo_list": uploaded,       # [{path, public_url, index}, ...]
+            "photo_list": uploaded,  # [{path, public_url, index}, ...]
         }
+
         try:
             _insert_post_row(row)
             print(f"[ALBUM] saved id={row['msg_id']} images={row['images_count']}")
         except Exception as e:
             print(f"[ERROR] Supabase insert (album): {e}")
 
-    # Одиночные сообщения с фото
+    # ======== ОБРАБОТЧИК ОДИНОЧНЫХ ФОТО ========
     @client.on(events.NewMessage(chats=MONITORED_CHATS, incoming=True))
     async def handle_single(event):
         # Если часть альбома — обработает handle_album
@@ -187,6 +202,7 @@ async def run():
         os.makedirs(media_dir, exist_ok=True)
         fn = f"{event.chat_id}_{event.id}.jpg"
         local_path = await event.message.download_media(file=os.path.join(media_dir, fn))
+
         if not local_path:
             return
 
@@ -206,6 +222,7 @@ async def run():
             "images_count": len(uploaded),
             "photo_list": uploaded,
         }
+
         try:
             _insert_post_row(row)
             print(f"[PHOTO] saved id={row['msg_id']} images={row['images_count']}")
@@ -219,5 +236,3 @@ if __name__ == "__main__":
         asyncio.run(run())
     except KeyboardInterrupt:
         print("👋 Завершение")
-
-

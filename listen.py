@@ -115,14 +115,15 @@ async def _sender_meta(event):
 
 async def run():
     client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+    
     # Подключаемся без интерактивного запроса
-await client.connect()
-if not await client.is_user_authorized():
-    raise RuntimeError("Session file is not authorized! Create .session file locally first.")
+    await client.connect()
+    if not await client.is_user_authorized():
+        raise RuntimeError("Session file is not authorized! Create .session file locally first.")
+    
+    print(f"🚀 Collector запущен, слушаем: {MONITORED_CHATS}")
 
-    print("🚀 Collector запущен, слушаем:", MONITORED_CHATS)
-
-    # Альбомы (несколько изображений в одном посте)
+    # ======== ОБРАБОТЧИК АЛЬБОМОВ ========
     @client.on(events.Album(chats=MONITORED_CHATS))
     async def handle_album(event):
         chat_name = await _chat_title(event)
@@ -218,4 +219,5 @@ if __name__ == "__main__":
         asyncio.run(run())
     except KeyboardInterrupt:
         print("👋 Завершение")
+
 

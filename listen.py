@@ -11,6 +11,7 @@ from typing import List, Dict, Optional
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.types import User
 from supabase import create_client, Client
 
@@ -149,8 +150,24 @@ async def _sender_meta(event):
 
 
 async def run():
-    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-    await client.start()
+    # 1) Railway: TELEGRAM_SESSION (StringSession)
+    # 2) Локально: файл collector.session
+    session_string = os.getenv("TELEGRAM_SESSION", "")
+
+    if session_string:
+        session = StringSession(session_string)
+        print("📱 Используется StringSession из переменной окружения")
+    else:
+        session = SESSION_NAME
+        print("📁 Используется файл сессии (локальный режим)")
+
+    client = TelegramClient(session, API_ID, API_HASH)
+
+    # Подключаемся без интерактивного запроса телефона
+    await client.connect()
+
+    if not await client.is_user_authorized():
+        raise RuntimeError("Session is not authorized! Check TELEGRAM_SESSION variable or .session file.")
 
     print("🚀 Collector запущен, слушаем:", MONITORED_CHATS)
 
